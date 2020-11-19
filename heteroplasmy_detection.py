@@ -1,20 +1,12 @@
 import sys,os
 import pandas as pd
+import argparse
 
 from create_sample import create_sample_list
+from fileIO import bamIO
+from basic import Basic
 
-from subprocess import *
 
-class Basic(object):
-    def __init__(self):
-        pass
-
-    @staticmethod
-    def run(cmd=None, wkdir=None):
-        sys.stderr.write("Running %s ...\n" % cmd)
-        p = Popen(cmd, shell=True, cwd=wkdir, stdout=PIPE)
-        p.wait()
-        return p
 
 class heteroplasmy(object):
     def __init__(self, work_dir="", sample_list_file=None, threads=None):
@@ -51,6 +43,7 @@ class heteroplasmy(object):
         #human reference hg19
         self.ref_genome = "/home/zyang/mit/ref/chrM.fa"
         self.whole_genome = "/home/zhluo/Project/mitch/autism/ref/GRCh37.p13.genome.fa"
+        self.picard = "/home/zhluo/Software/picard.jar"
         
         #output bam dir
         self.bam_dir = os.path.join(self.prefix, "bam")
@@ -64,6 +57,10 @@ class heteroplasmy(object):
         self.pbs_dir = os.path.join(self.prefix, "pbs") 
         if not os.path.exists(self.pbs_dir):
             os.makedirs(self.pbs_dir)
+        #tmp dir    
+        self.tmp_dir = os.path.join(self.prefix, "tmp") 
+        if not os.path.exists(self.tmp_dir):
+            os.makedirs(self.tmp_dir)
             
     def read_sample_file(self):
         """
@@ -115,11 +112,61 @@ class heteroplasmy(object):
         
         return(cmd)
         
+    def new_process(self, sampleID=None, fastq_1=None, fastq_2=None):
+        oneSample_dir = os.path.join(self.bam_dir, sampleID)
+        if not os.path.exists(oneSample_dir):
+            os.makedirs(oneSample_dir)
+        log_file = os.path.join(oneSample_dir, sampleID + ".log.txt")
+        #step1. bwa mapping to whole genome
+        sort_bam = os.path.join(oneSample_dir, sampleID + ".sort.bam")
+        cmd = """%s mem -R '@RG\\tID:GRCH38\\tSM:%s\\tLB:\\tPL:ILLUMINA' -t %s %s %s %s|%s view -@ %s -Shu -|%s sort -@ %s -o %s - > %s;\n""" % \
+                (self.bwa, sampleID, self.threads, self.whole_genome, fastq_1, fastq_2, self.samtools, self.threads,self.samtools, self.threads,\
+                 sort_bam, log_file)
+        ##step1.1 bwa index for bam file
+        cmd += """%s index %s;\n""" % (self.samtools, sort_bam)
+        os.system(cmd)
+        
+        #step2. filter out read mapped in bam file
+        bamio = bamIO(bam_file = "/home/zyang/Project/mitochondria/pnas_data/luo_pipeline/work_test/bam/ERR452358/ERR452358.sort.bam")
+        MTbam = bamio.run() 
+        cmd += """%s index %s;\n""" % (self.samtools, MTbam)
+        
+        
+        #step3. mark duplicate
+        marked_duplicated_bam = os.path.join(oneSample_dir, sampleID + ".mkdup.bam")
+        mkmatrix = os.path.join(oneSample_dir, sampleID + ".mkdup.matrix.txt") 
+        cmd += self.markduplicate(input_bam = MTbam, marked_duplicated_bam=marked_duplicated_bam, marked_dup_metrics_txt=mkmatrix)
+        bamio.sample_meta_infor["mkduped_read"] = bamio.mapped_read(input_bam = MTbam)
+        
+        #step4. mpileup 
+        p_sort_bam = os.path.join(oneSample_dir, sampleID + ".p.sort.bam")
+        cmd += "%s sort -@ 7 -o %s %s;\n" % (self.samtools, p_sort_bam, MT_bam_unique)
+        mpile_file = os.path.join(self.mpile_dir, sampleID + ".mpile.file")
+        cmd += "%s mpileup -B -Q 30 -d 1000000 -L 10000 -f %s %s > %s;" %(self.samtools, self.ref_genome, p_sort_bam, mpile_file)
+
+        #step5. call heteroplasmy
+        # heteroplasmy
+        heteroplasmy_raw = os.path.join(oneSample_dir, sampleID + ".mp.raw")
+        cmd += '%s -i %s -o %s;\n' %(self.het_raw, mpile_file, heteroplasmy_raw)
+        heteropasmy = os.path.join(self.mpile_dir, sampleID + ".heteroplasmy.txt")
+        cmd += 'python2 %s --loose %s --chi %s -d %s --mle %s -i %s -o %s' \
+                             %(self.het_filter, "0.003,0.003", "0.0", "1000", "0", heteroplasmy_raw, heteropasmy)
+        
+        return(cmd)
+        
     def alignmrnt_parse(self, alignment_file):
         """
         alignment_file is sort bam file
         """
         pass
+        
+    def markduplicate(self, input_bam=None, marked_duplicated_bam=None, marked_dup_metrics_txt=None):
+        """
+        picard markduplicate
+        """
+        cmd="java -Djava.io.tmpdir=%s -jar -Xms1024m -Xmx10240m %s MarkDuplicates I=%s O=%s M=%s VALIDATION_STRINGENCY=LENIENT ASSUME_SORT_ORDER=queryname REMOVE_DUPLICATES=true;\n"\
+            %(self.tmp_dir, self.picard, input_bam, marked_duplicated_bam, marked_dup_metrics_txt)
+        return(cmd)
 
     def main(self):
         df_sample = self.read_sample_file()

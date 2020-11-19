@@ -12,6 +12,7 @@ class bamIO():
         if not self.samfile.check_index():
             print("bam index file missing!")
             exit(1)
+        self.sample_meta_infor = {}
         
     def getBasicAlignInfo(self, chr="chrM"):
         """
@@ -23,6 +24,7 @@ class bamIO():
         """
         mapped_reads = self.samfile.mapped
         ummapped_reads = self.samfile.unmapped
+        self.sample_meta_infor["mapped_reads"] = mapped_reads
         
         chr_mapped = self.samfile.get_index_statistics()
         list_chr = []
@@ -46,33 +48,61 @@ class bamIO():
         
     def getMTReads(self):
         """
-        extract nitochondria read, properly paired read
+        extract nitochondria read
         """
         #get MT read
+        
         MTSam = self.samfile.fetch('chrM')
-        #print(MTSam.get_reference_name)
+        return(MTSam)
+        
+        
+    def properly_paired(self, samfile=None):
+        """
+        get properly paired read rnext "="
+        """
         #output file
         MTSam_file = os.path.join(os.path.dirname(self.bam), "MT.bam")        
         pairedreads = pysam.AlignmentFile(MTSam_file, "wb", template=self.samfile)
         
         #get reference id
         tid = self.samfile.get_tid("chrM")
-        #filter, properly paired, 
+        #filter, properly paired,
+        MTSam = samfile 
+        properly_n, diff_chr_n = 0, 0
+        MT_n = 0
         for read in MTSam:
+            MT_n += 1
             chr = read.reference_id
             rnext = read.next_reference_id
             #condition is properly paied, chrom == "chrM", rnext=="chrM"
-            if read.is_proper_pair and chr==tid and rnext==tid: 
-                pairedreads.write(read)
+            if read.is_proper_pair:
+                properly_n = properly_n + 1
+                if chr==tid and rnext==tid:
+                    diff_chr_n = diff_chr_n + 1 
+                    pairedreads.write(read)
+        self.sample_meta_infor["MT_reads"] = MT_n
+        self.sample_meta_infor["properly_paired"] = properly_n
+        self.sample_meta_infor["sameChrom_paired"] = diff_chr_n
         return(MTSam_file)
         
+    def mapped_read(self, input_bam=None)
+        samfile = pysam.AlignmentFile(input_bam, "rb")
+        mapped_reads = samfile.mapped
+        return(mapped_reads)        
         
-    def markduplicate(self):
-        pass
+    def run(self):
+        """
+        all bam process step
+        """
+        #step1. get MT read, properly paired read, fq1 and fq2 both mapped to chrM read
+        self.getBasicAlignInfo()
+        MTSam = self.getMTReads()
+        filterSam = self.properly_paired(samfile=MTSam)
+        print(self.sample_meta_infor)
+        return(filterSam)
         
-        
+    
         
 if __name__ == "__main__":
-    bamio = bamIO(bam_file = "/home/zyang/Project/mitochondria/pnas_data/luo_pipeline/work_test/bam/ERR452358/ERR452358.sort.bam")
-    #bamio.getBasicAlignInfo()
-    bamio.getMTReads()    
+    bamio = bamIO(bam_file = "/home/zyang/Project/mitochondria/pnas_data/luo_pipeline/work_test/bam/ERR452358/ERR452358.sort.bam")    
+    bamio.run()    
