@@ -1,0 +1,11 @@
+#tools
+bwa = /home/zhluo/miniconda3/bin/bwa
+samtools = /home/zxchen/anaconda3/bin/samtools
+picard = /home/zhluo/Software/picard.jar
+bbmap = /home/zhluo/miniconda3/bin/filterbyname.sh
+het_raw=/home/zyang/software/heteroplasmy.pyflow/heteroplasmy.mle.py
+het_filter=/home/zyang/software/heteroplasmy.pyflow/heteroplasmy.mle.filter.py
+bamleftalign= /home/zhluo/miniconda3/bin/bamleftalign
+#human reference hg19
+ref_genome = /home/zyang/mit/ref/chrM.fa
+whole_genome = /home/zhluo/Project/mitch/autism/ref/GRCh37.p13.genome.fa

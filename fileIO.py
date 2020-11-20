@@ -85,10 +85,37 @@ class bamIO():
         self.sample_meta_infor["sameChrom_paired"] = diff_chr_n
         return(MTSam_file)
         
-    def mapped_read(self, input_bam=None)
+    def mapped_read(self, input_bam=None):
         samfile = pysam.AlignmentFile(input_bam, "rb")
         mapped_reads = samfile.mapped
-        return(mapped_reads)        
+        return(mapped_reads)
+        
+        
+    def limit_mismatch(self, input_bam=None, output_bam=None, mismatch_num=2):
+        """
+        limit mismatch number of each read.
+        default is 2
+        only mapped read has NM field. so this step is after MT bam extracting
+        """
+        bamfile = pysam.AlignmentFile(input_bam, "rb")
+        if not bamfile.check_index():
+            print("bam index file missing!")
+            exit(1)
+        filter_bam = output_bam
+        pairedreads = pysam.AlignmentFile(filter_bam, "wb", template=bamfile)
+        before, after = 0, 0
+        for read in bamfile:
+            tag = read.get_tag("NM", with_value_type=False)
+            before += 1
+            if (tag < mismatch_num):
+                pairedreads.write(read)
+                after += 1
+        pairedreads.close()
+        bamfile.close()
+        self.sample_meta_infor["befor_mismatch_filter"] = before
+        self.sample_meta_infor["after_mismatch_filter"] = after
+        
+              
         
     def run(self):
         """
@@ -105,4 +132,6 @@ class bamIO():
         
 if __name__ == "__main__":
     bamio = bamIO(bam_file = "/home/zyang/Project/mitochondria/pnas_data/luo_pipeline/work_test/bam/ERR452358/ERR452358.sort.bam")    
-    bamio.run()    
+    #bamio.run()
+    bamio.limit_mismatch(input_bam="/home/zyang/Project/mitochondria/pnas_data/luo_pipeline/work_test/bam/ERR452358/ERR452358.localRealign.bam")
+        

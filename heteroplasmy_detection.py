@@ -9,7 +9,7 @@ from basic import Basic
 
 
 class heteroplasmy(object):
-    def __init__(self, work_dir="", sample_list_file=None, threads=None):
+    def __init__(self, work_dir=None, threads=None):
         """
         1. work_dir: the path should be a new dir, contain all result
         the structure of work dir:
@@ -31,19 +31,8 @@ class heteroplasmy(object):
         self.prefix= work_dir
         if not os.path.exists(self.prefix):
             os.makedirs(self.prefix)
-        self.sample_list_file = sample_list_file
-        self.threads= threads        
         
-        #tools
-        self.bwa = "/home/nazhang/luozhihui/software/bwa/bwa"
-        self.samtools = "/home/zxchen/anaconda3/bin/samtools"
-        self.bbmap = "/home/zhluo/miniconda3/bin/filterbyname.sh"
-        self.het_raw="/home/zyang/software/heteroplasmy.pyflow/heteroplasmy.mle.py"
-        self.het_filter="/home/zyang/software/heteroplasmy.pyflow/heteroplasmy.mle.filter.py"
-        #human reference hg19
-        self.ref_genome = "/home/zyang/mit/ref/chrM.fa"
-        self.whole_genome = "/home/zhluo/Project/mitch/autism/ref/GRCh37.p13.genome.fa"
-        self.picard = "/home/zhluo/Software/picard.jar"
+        self.threads= threads        
         
         #output bam dir
         self.bam_dir = os.path.join(self.prefix, "bam")
@@ -62,14 +51,7 @@ class heteroplasmy(object):
         if not os.path.exists(self.tmp_dir):
             os.makedirs(self.tmp_dir)
             
-    def read_sample_file(self):
-        """
-        every sample should be put in one line,
-        format:
-        sample_id\tfastq_1\tfastq_2 
-        """
-        df = pd.read_csv(self.sample_list_file, sep="\t", names=["sampleID", "fastq_1", "fastq_2"])
-        return(df)
+    
         
     def process(self, sampleID=None, fastq_1=None, fastq_2=None):
         oneSample_dir = os.path.join(self.bam_dir, sampleID)
@@ -78,39 +60,46 @@ class heteroplasmy(object):
         log_file = os.path.join(oneSample_dir, sampleID + ".log.txt")
         #step1. bwa mapping to whole genome
         sort_bam = os.path.join(oneSample_dir, sampleID + ".sort.bam")
-        cmd = """%s mem -R '@RG\\tID:GRCH38\\tSM:%s\\tLB:\\tPL:ILLUMINA' -t %s %s %s %s|%s view -@ %s -Shu -|%s sort -@ %s -o %s - > %s;\n""" % \
+        cmd = """%s mem -R '@RG\\tID:GRCH37\\tSM:%s\\tLB:\\tPL:ILLUMINA' -t %s %s %s %s|%s view -@ %s -Shu -|%s sort -@ %s -o %s - > %s;\n""" % \
                 (self.bwa, sampleID, self.threads, self.whole_genome, fastq_1, fastq_2, self.samtools, self.threads,self.samtools, self.threads,\
                  sort_bam, log_file)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
         ##step1.1 bwa index for bam file
-        cmd += """%s index %s;\n""" % (self.samtools, sort_bam)
+        cmd = """%s index %s;\n""" % (self.samtools, sort_bam)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
         
         #step2. filter out read mapped in bam file
         MT_bam = os.path.join(oneSample_dir, sampleID + ".MT.bam")
-        cmd += "%s view -bh %s chrM -o %s;\n" %(self.samtools, sort_bam, MT_bam)
-
+        cmd = "%s view -bh %s chrM -o %s;\n" %(self.samtools, sort_bam, MT_bam)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
+        
         #step3. obtain unique mapped reads
         MT_bam_unique = os.path.join(oneSample_dir, sampleID + ".unique.MT.bam")
         MT_bam_noneUnique = os.path.join(oneSample_dir, sampleID + ".noneUnique.MT.bam")
-        cmd += "%s view -h %s | grep -v -e 'XA:Z:' -e 'SA:Z:' | samtools view -b > %s;" % \
+        cmd = "%s view -h %s | grep -v -e 'XA:Z:' -e 'SA:Z:' | samtools view -b > %s;" % \
                 (self.samtools, MT_bam, MT_bam_unique)
-        cmd += "%s view -h %s | grep -e 'XA:Z:' -e 'SA:Z:' | samtools view -b > %s;" % \
+        Basic.run(cmd=cmd, wkdir=self.prefix)
+        cmd = "%s view -h %s | grep -e 'XA:Z:' -e 'SA:Z:' | samtools view -b > %s;" % \
                 (self.samtools, MT_bam, MT_bam_noneUnique)
-        
+        Basic.run(cmd=cmd, wkdir=self.prefix)
         #step4. mpileup 
         p_sort_bam = os.path.join(oneSample_dir, sampleID + ".p.sort.bam")
-        cmd += "%s sort -@ 7 -o %s %s;\n" % (self.samtools, p_sort_bam, MT_bam_unique)
+        cmd = "%s sort -@ 7 -o %s %s;\n" % (self.samtools, p_sort_bam, MT_bam_unique)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
         mpile_file = os.path.join(self.mpile_dir, sampleID + ".mpile.file")
-        cmd += "%s mpileup -B -Q 30 -d 1000000 -L 10000 -f %s %s > %s;" %(self.samtools, self.ref_genome, p_sort_bam, mpile_file)
-
+        cmd = "%s mpileup -B -Q 30 -d 1000000 -L 10000 -f %s %s > %s;" %(self.samtools, self.ref_genome, p_sort_bam, mpile_file)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
+        
         #step5. call heteroplasmy
         # heteroplasmy
         heteroplasmy_raw = os.path.join(oneSample_dir, sampleID + ".mp.raw")
-        cmd += '%s -i %s -o %s;\n' %(self.het_raw, mpile_file, heteroplasmy_raw)
+        cmd = '%s -i %s -o %s;\n' %(self.het_raw, mpile_file, heteroplasmy_raw)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
         heteropasmy = os.path.join(self.mpile_dir, sampleID + ".heteroplasmy.txt")
-        cmd += 'python2 %s --loose %s --chi %s -d %s --mle %s -i %s -o %s' \
+        cmd = 'python2 %s --loose %s --chi %s -d %s --mle %s -i %s -o %s' \
                              %(self.het_filter, "0.003,0.003", "0.0", "1000", "0", heteroplasmy_raw, heteropasmy)
-        
-        return(cmd)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
+        print("finish detetcting!")
         
     def new_process(self, sampleID=None, fastq_1=None, fastq_2=None):
         oneSample_dir = os.path.join(self.bam_dir, sampleID)
@@ -119,46 +108,90 @@ class heteroplasmy(object):
         log_file = os.path.join(oneSample_dir, sampleID + ".log.txt")
         #step1. bwa mapping to whole genome
         sort_bam = os.path.join(oneSample_dir, sampleID + ".sort.bam")
-        cmd = """%s mem -R '@RG\\tID:GRCH38\\tSM:%s\\tLB:\\tPL:ILLUMINA' -t %s %s %s %s|%s view -@ %s -Shu -|%s sort -@ %s -o %s - > %s;\n""" % \
+        cmd = """%s mem -R '@RG\\tID:GRCH37\\tSM:%s\\tLB:mitochondira\\tPL:ILLUMINA' -t %s %s %s %s|%s view -@ %s -Shu -|%s sort -@ %s -o %s - > %s;\n""" % \
                 (self.bwa, sampleID, self.threads, self.whole_genome, fastq_1, fastq_2, self.samtools, self.threads,self.samtools, self.threads,\
                  sort_bam, log_file)
-        ##step1.1 bwa index for bam file
-        cmd += """%s index %s;\n""" % (self.samtools, sort_bam)
-        os.system(cmd)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
+        cmd = """%s index %s;\n""" % (self.samtools, sort_bam)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
         
         #step2. filter out read mapped in bam file
         bamio = bamIO(bam_file = "/home/zyang/Project/mitochondria/pnas_data/luo_pipeline/work_test/bam/ERR452358/ERR452358.sort.bam")
         MTbam = bamio.run() 
-        cmd += """%s index %s;\n""" % (self.samtools, MTbam)
+        cmd = """%s index %s;\n""" % (self.samtools, MTbam)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
         
         
         #step3. mark duplicate
         marked_duplicated_bam = os.path.join(oneSample_dir, sampleID + ".mkdup.bam")
         mkmatrix = os.path.join(oneSample_dir, sampleID + ".mkdup.matrix.txt") 
-        cmd += self.markduplicate(input_bam = MTbam, marked_duplicated_bam=marked_duplicated_bam, marked_dup_metrics_txt=mkmatrix)
-        bamio.sample_meta_infor["mkduped_read"] = bamio.mapped_read(input_bam = MTbam)
+        cmd = self.markduplicate(input_bam = MTbam, marked_duplicated_bam=marked_duplicated_bam, marked_dup_metrics_txt=mkmatrix)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
+        bamio.sample_meta_infor["befor_mkduped_read"] = bamio.mapped_read(input_bam = MTbam)
+        cmd = """%s index %s;\n""" % (self.samtools, marked_duplicated_bam)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
+        bamio.sample_meta_infor["after_mkduped_read"] = bamio.mapped_read(input_bam = marked_duplicated_bam)
         
-        #step4. mpileup 
+        
+        #step4. local realignment
+        localRealign_bam = os.path.join(oneSample_dir, sampleID + ".localRealign.bam")
+        cmd = self.localRealignment(input_bam=marked_duplicated_bam, output_bam=localRealign_bam)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
+        cmd = """%s index %s;\n""" % (self.samtools, localRealign_bam)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
+        bamio.sample_meta_infor["after_local_realign"] = bamio.mapped_read(input_bam = localRealign_bam)
+        
+        #step5. mismatch filter
+        mismatch_bam = os.path.join(oneSample_dir, sampleID + ".mismatchFilter.bam")
+        bamio.limit_mismatch(input_bam=localRealign_bam, output_bam=mismatch_bam, mismatch_num=1)
+        cmd = """%s index %s;\n""" % (self.samtools, localRealign_bam)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
+        
+        
+        #step5. mpileup 
         p_sort_bam = os.path.join(oneSample_dir, sampleID + ".p.sort.bam")
-        cmd += "%s sort -@ 7 -o %s %s;\n" % (self.samtools, p_sort_bam, MT_bam_unique)
+        MT_bam_unique = os.path.join(oneSample_dir, sampleID + ".unique.MT.bam")
+        cmd = "%s view -h %s | grep -v -e 'XA:Z:' -e 'SA:Z:' | samtools view -b > %s;" % \
+                (self.samtools, mismatch_bam, MT_bam_unique)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
+        cmd = "%s sort -@ 7 -o %s %s;\n" % (self.samtools, p_sort_bam, MT_bam_unique)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
         mpile_file = os.path.join(self.mpile_dir, sampleID + ".mpile.file")
-        cmd += "%s mpileup -B -Q 30 -d 1000000 -L 10000 -f %s %s > %s;" %(self.samtools, self.ref_genome, p_sort_bam, mpile_file)
+        cmd = "%s mpileup -B -Q 20 -q 20 -d 1000000 -L 10000 -f %s %s > %s;" %(self.samtools, self.ref_genome, MT_bam_unique, mpile_file)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
 
         #step5. call heteroplasmy
         # heteroplasmy
         heteroplasmy_raw = os.path.join(oneSample_dir, sampleID + ".mp.raw")
-        cmd += '%s -i %s -o %s;\n' %(self.het_raw, mpile_file, heteroplasmy_raw)
+        cmd = '%s -i %s -o %s;\n' %(self.het_raw, mpile_file, heteroplasmy_raw)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
         heteropasmy = os.path.join(self.mpile_dir, sampleID + ".heteroplasmy.txt")
-        cmd += 'python2 %s --loose %s --chi %s -d %s --mle %s -i %s -o %s' \
+        cmd = 'python2 %s --loose %s --chi %s -d %s --mle %s -i %s -o %s' \
                              %(self.het_filter, "0.003,0.003", "0.0", "1000", "0", heteroplasmy_raw, heteropasmy)
+        Basic.run(cmd=cmd, wkdir=self.prefix)
+        print("finish heteroplasmy detecting!")
+        print(bamio.sample_meta_infor)
         
-        return(cmd)
+    def argument_parse(self, config_file=None):
+        """
+        config_file: including all tools path
+        this function set attribute to self, all tools in config file will be set
+        #tools
+        bwa = /home/zhluo/miniconda3/bin/bwa
+        samtools = /home/zxchen/anaconda3/bin/samtools
+        picard = /home/zhluo/Software/picard.jar
+        bbmap = /home/zhluo/miniconda3/bin/filterbyname.sh
+        het_raw=/home/zyang/software/heteroplasmy.pyflow/heteroplasmy.mle.py
+        het_filter=/home/zyang/software/heteroplasmy.pyflow/heteroplasmy.mle.filter.py
+        bamleftalign= /home/zhluo/miniconda3/bin/bamleftalign
+        #human reference hg19
+        ref_genome = /home/zyang/mit/ref/chrM.fa
+        whole_genome = /home/zhluo/Project/mitch/autism/ref/GRCh37.p13.genome.fa
         
-    def alignmrnt_parse(self, alignment_file):
         """
-        alignment_file is sort bam file
-        """
-        pass
+        arguments = Basic.read_arguments(arg_file=config_file)
+        for key in arguments:
+            setattr(self, key, arguments[key])        
         
     def markduplicate(self, input_bam=None, marked_duplicated_bam=None, marked_dup_metrics_txt=None):
         """
@@ -167,61 +200,40 @@ class heteroplasmy(object):
         cmd="java -Djava.io.tmpdir=%s -jar -Xms1024m -Xmx10240m %s MarkDuplicates I=%s O=%s M=%s VALIDATION_STRINGENCY=LENIENT ASSUME_SORT_ORDER=queryname REMOVE_DUPLICATES=true;\n"\
             %(self.tmp_dir, self.picard, input_bam, marked_duplicated_bam, marked_dup_metrics_txt)
         return(cmd)
+        
+    def localRealignment(self, input_bam=None, output_bam=None):
+        """
+        this function is a wrap for bamleftalign.
+        local realignment and recalibrate base quality
+        """
+        cmd = "%s -c -f %s < %s | %s calmd -EArb - %s >%s;\n" % (self.bamleftalign, self.ref_genome, input_bam,
+        self.samtools,  self.ref_genome, output_bam)
+        return(cmd)
 
-    def main(self):
-        df_sample = self.read_sample_file()
-        for idx,row in df_sample.iterrows():
-            sampleID = row["sampleID"]
-            fastq_1 = row["fastq_1"]
-            fastq_2 = row["fastq_2"]
-            
-            cmd = self.process(sampleID=sampleID, fastq_1=fastq_1, fastq_2=fastq_2)
-            handle = open(os.path.join(self.pbs_dir , sampleID + ".pbs"), "w")
-            handle.write(cmd)
-            handle.close()
-        print("finish pbs job!")
+
         
-    def submit(self, number=None, mem="15G"):
-        """
-        number: how many jobs to submit:
-        "all", "last_one"
-        """
-        handle = open(self.sample_list_file, "r")
-        samples = handle.readlines()
-        if number == "last_one":
-            last_one = samples[-1].split("\t")[0]
-            last_one_pbs = os.path.join(self.pbs_dir, last_one + ".pbs")
-            cmd = "qsub -l nodes=1:ppn=%s -l mem=%s %s" %(self.threads, mem, last_one_pbs)
-            p = Basic.run(cmd, wkdir=self.pbs_dir)
-            print(p.stdout.read())
-            
-        if number == "all":
-            for one_sample in samples:
-                one = one_sample[-1].split("\t")[0]
-                one_pbs = os.path.join(self.pbs_dir, one + ".pbs")
-                cmd = "qsub -l nodes=1:ppn=%s -l mem=%s %s" %(self.threads, mem, one_pbs)
-                p = Basic.run(cmd, wkdir=self.pbs_dir)
-                print(p.stdout.read())
-        print("finish submit pbs!")
-            
-            
+def run(prog=None, args=None):
+    usage = """usage: 
+python /home/zyang/software/MitEdit/heteroplasmy_detection.py --sampleID [] --fastq_1 [] --fastq_2 [] --config [] --work_dir []
+call heteroplasmy for each sample
+Author: Zhihui Luo
+last update 11/19 2020"""
+    #parser = argparse.ArgumentParser(, description = usage)
+    print(args)
+    parser = argparse.ArgumentParser(prog = prog, usage=usage)
+    parser.add_argument("--sampleID",type=str,required=True, help='sample id of fastq file')
+    parser.add_argument("--fastq_1",type=str,required=True, help='input fastq 1')
+    parser.add_argument("--fastq_2",type=str,required=True, help='input fastq 2')
+    parser.add_argument("--config",type=str,required=True, help='config file containing all excute file path')
+    parser.add_argument("--work_dir",type=str,required=True, help='output dir')
+    opts = parser.parse_args(args)
         
-    
+    #initial heteroplasmy class
+    hetero = heteroplasmy(work_dir=opts.work_dir, threads=7)
+    hetero.argument_parse(config_file=opts.config)
+    hetero.new_process(sampleID=opts.sampleID, fastq_1=opts.fastq_1, fastq_2=opts.fastq_2)
+
+
 if __name__ == "__main__":
-    """
-    todo, I may have to do quality trim for fastq file tommorrow
-    """
-    #create work dir
-    work_dir = "/home/zyang/Project/mitochondria/pnas_data/luo_pipeline/work_test"
-    if not os.path.exists(work_dir):
-            os.makedirs(work_dir)
-    #step1. create fastq input file
-    fastq_dir = "/home/zyang/Project/mitochondria/pnas_data/fastq"
-    create_sample_file = create_sample_list(sample_dir=fastq_dir, work_dir=work_dir)
-    sample_list_file = create_sample_file.create_sample_file()
-    #step2. create pbs
-    call_mut = heteroplasmy(work_dir=work_dir, sample_list_file=sample_list_file, threads=7)
-    call_mut.main()
-    
-    #step 3: submit qsub
-    call_mut.submit(number="last_one", mem="15G")
+    print(sys.argv[0])
+    run(prog=sys.argv[0:1], args=sys.argv[1:])        
